@@ -1,0 +1,113 @@
+I want to create a game similar to block blast but with more features, rewards, leaderboard, online multiplayers, and suggest more items for me to be includedFeb 21Here's a comprehensive breakdown for your enhanced Block Blast-style game:
+
+🎮 Core Gameplay (Block Blast Foundation)
+The base remains the same — drag and drop tetromino-style blocks onto a grid, clear rows/columns to score points. But here's how to expand it massively:
+
+🆕 New Block Types & Items
+Special Blocks
+
+Bomb Block — Clears a 3x3 area when placed
+Lightning Block — Clears an entire row AND column
+Rainbow Block — Acts as a wildcard, fits any shape
+Freeze Block — Locks adjacent blocks in place temporarily
+Mirror Block — Reflects its shape horizontally/vertically
+Ghost Block — Can overlap one existing block
+Multiplier Block — Doubles points for the next clear
+Magnet Block — Pulls nearby blocks to fill gaps automatically
+Chain Block — Triggers a combo if placed next to another Chain Block
+Drill Block — Bores through a full column, removing one block per row
+Sticky Block — Merges with adjacent blocks of the same color to form mega-clears
+
+Obstacle Blocks (make it harder)
+
+Stone Block — Requires 2 clears to remove
+Ice Block — Must be cleared twice (cracks first, then breaks)
+Locked Block — Needs a key item to unlock
+Virus Block — Spreads to adjacent cells if not cleared in time
+Anchor Block — Cannot be moved once placed
+Corrupted Block — Randomly swaps positions with nearby blocks
+
+
+🏆 Rewards System
+Daily & Weekly Rewards
+
+Login streaks (Day 1–7 escalating rewards)
+Daily challenges (e.g., "Clear 5 rows using only red blocks")
+Weekly missions with premium currency payouts
+
+Achievement Badges
+
+First 1,000 points, First combo x5, First multiplayer win, etc.
+Rare/Epic/Legendary tiers with cosmetic unlocks
+
+Seasonal Events
+
+Holiday-themed boards (Halloween grid, Christmas special blocks)
+Limited-time skins and block designs
+
+Reward Types
+
+💎 Gems (premium currency)
+🪙 Coins (standard currency)
+🎁 Mystery Boxes (random block skins, power-ups, boosters)
+🔑 Keys (unlock special modes or Locked Blocks)
+🃏 Power-up Cards (one-time use specials)
+
+
+🌐 Online Multiplayer Modes
+1v1 Battle Mode
+
+Both players share a mirrored board; clearing rows sends "garbage" blocks to your opponent
+
+2v2 Team Mode
+
+Teammates share a power-up pool and can send helpful blocks to each other
+
+Battle Royale (up to 50 players)
+
+Last player standing wins; the grid shrinks over time
+Eliminated players can spectate with reactions
+
+Co-op Puzzle Mode
+
+Two players work on the same board together to beat a high-score target
+
+Blitz Tournament
+
+Timed 3-minute rounds, bracket-style elimination
+Weekly scheduled tournaments with prize pools
+
+Ghost Race
+
+Race against a recording of another player's run in real-time
+
+
+📊 Leaderboard System
+
+Global Leaderboard — All-time and weekly top scores
+Friends Leaderboard — Compete with your social circle
+Regional Leaderboard — Country/city-based rankings
+Mode-Specific Boards — Separate rankings per game mode
+Season Leaderboard — Resets every 30 days with seasonal rewards for top finishers
+Clan/Guild Rankings — Group-based competitive ladder
+
+
+🎨 Customization & Progression
+Player Progression
+
+XP-based leveling system (Level 1–100+)
+Prestige system after max level
+Skill trees — unlock passive bonuses (e.g., +10% score on combos, start with 1 bomb per game)
+
+Cosmetics
+
+Block skins (neon, pixel art, glass, galaxy themes)
+Board/grid themes
+Animated backgrounds
+Custom clear effects (explosions, confetti, fire)
+Player avatars and profile banners
+Title badges ("Grandmaster", "Block Lord", etc.)
+
+
+⚡ Power-Up System (In-Game)
+Power-UpEffectUndoReverses last placed blockShuffleRefreshes your current block setHintHighlights the best possible placementTime FreezePauses a timer in timed modesBlock SwapSwap one block for a random new oneScore Surge2x score for 10 secondsAuto-ClearAutomatically clears the most complete row/column

@@ -1,0 +1,512 @@
+import type { Express } from "express";
+import { createServer, type Server } from "node:http";
+import session from "express-session";
+import ConnectPgSimple from "connect-pg-simple";
+import { db } from "./db";
+import {
+  users,
+  matches,
+  targetPuzzles,
+  dailyPuzzles,
+  dailyPuzzleScores,
+  playerPuzzleProgress,
+  purchases,
+  playerBattlePass,
+} from "@shared/schema";
+import { eq, and, desc, sql } from "drizzle-orm";
+import {
+  registerUser,
+  loginUser,
+  createGuestUser,
+  findOrCreateSocialUser,
+  upgradeGuestAccount,
+  getUserById,
+  requireAuth,
+} from "./auth";
+import { setupWebSocket } from "./multiplayer";
+import {
+  generateDailyPuzzle,
+  generateTargetPuzzles,
+} from "./puzzle-generator";
+import {
+  getPlayerBattlePass,
+  addBattlePassXp,
+  claimTierReward,
+} from "./battle-pass";
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  const PgSession = ConnectPgSimple(session);
+
+  app.use(
+    session({
+      store: new PgSession({
+        conString: process.env.DATABASE_URL,
+        createTableIfMissing: true,
+      }),
+      secret: process.env.SESSION_SECRET!,
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" as const : "lax" as const,
+      },
+    })
+  );
+
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password required" });
+      }
+      if (username.length < 3 || password.length < 4) {
+        return res
+          .status(400)
+          .json({ error: "Username must be 3+ chars, password 4+ chars" });
+      }
+      const user = await registerUser(username, password);
+      req.session.userId = user.id;
+      res.json({
+        id: user.id,
+        username: user.username,
+        eloRating: user.eloRating,
+        league: user.league,
+        coins: user.coins,
+        gems: user.gems,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password required" });
+      }
+      const user = await loginUser(username, password);
+      req.session.userId = user.id;
+      res.json({
+        id: user.id,
+        username: user.username,
+        eloRating: user.eloRating,
+        league: user.league,
+        coins: user.coins,
+        gems: user.gems,
+        wins: user.wins,
+        losses: user.losses,
+        draws: user.draws,
+        vipActive: user.vipActive,
+      });
+    } catch (err: any) {
+      res.status(401).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    const user = await getUserById(req.session.userId);
+    if (!user) {
+      return res.status(401).json({ error: "User not found" });
+    }
+    res.json({
+      id: user.id,
+      username: user.username,
+      eloRating: user.eloRating,
+      league: user.league,
+      coins: user.coins,
+      gems: user.gems,
+      wins: user.wins,
+      losses: user.losses,
+      draws: user.draws,
+      vipActive: user.vipActive,
+      xp: user.xp,
+      level: user.level,
+      isGuest: user.isGuest,
+      authProvider: user.authProvider,
+    });
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.json({ ok: true });
+    });
+  });
+
+  app.post("/api/auth/guest", async (req, res) => {
+    try {
+      const user = await createGuestUser();
+      req.session.userId = user.id;
+      res.json({
+        id: user.id,
+        username: user.username,
+        eloRating: user.eloRating,
+        league: user.league,
+        coins: user.coins,
+        gems: user.gems,
+        wins: user.wins,
+        losses: user.losses,
+        draws: user.draws,
+        vipActive: user.vipActive,
+        isGuest: user.isGuest,
+        authProvider: user.authProvider,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/auth/social", async (req, res) => {
+    try {
+      const { provider, providerId, displayName, idToken } = req.body;
+      if (!provider || !providerId || !displayName) {
+        return res.status(400).json({ error: "Missing provider info" });
+      }
+      if (provider === "google" && idToken) {
+        try {
+          const response = await fetch(
+            `https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`
+          );
+          const payload = await response.json();
+          if (payload.error || payload.sub !== providerId) {
+            return res.status(401).json({ error: "Invalid Google token" });
+          }
+        } catch {
+          return res.status(401).json({ error: "Token verification failed" });
+        }
+      }
+      const currentUserId = req.session?.userId;
+      let user;
+      if (currentUserId) {
+        const currentUser = await getUserById(currentUserId);
+        if (currentUser && currentUser.isGuest) {
+          user = await upgradeGuestAccount(
+            currentUserId,
+            provider,
+            providerId,
+            displayName
+          );
+        } else {
+          user = await findOrCreateSocialUser(provider, providerId, displayName);
+        }
+      } else {
+        user = await findOrCreateSocialUser(provider, providerId, displayName);
+      }
+      req.session.userId = user.id;
+      res.json({
+        id: user.id,
+        username: user.username,
+        eloRating: user.eloRating,
+        league: user.league,
+        coins: user.coins,
+        gems: user.gems,
+        wins: user.wins,
+        losses: user.losses,
+        draws: user.draws,
+        vipActive: user.vipActive,
+        isGuest: user.isGuest,
+        authProvider: user.authProvider,
+      });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/player/profile", requireAuth, async (req, res) => {
+    const user = await getUserById(req.session.userId!);
+    if (!user) return res.status(404).json({ error: "Not found" });
+    res.json({
+      id: user.id,
+      username: user.username,
+      eloRating: user.eloRating,
+      league: user.league,
+      coins: user.coins,
+      gems: user.gems,
+      wins: user.wins,
+      losses: user.losses,
+      draws: user.draws,
+      xp: user.xp,
+      level: user.level,
+      vipActive: user.vipActive,
+    });
+  });
+
+  app.get("/api/player/match-history", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const history = await db
+      .select()
+      .from(matches)
+      .where(
+        sql`(${matches.player1Id} = ${userId} OR ${matches.player2Id} = ${userId}) AND ${matches.status} = 'completed'`
+      )
+      .orderBy(desc(matches.createdAt))
+      .limit(20);
+    res.json(history);
+  });
+
+  app.get("/api/target-puzzles", async (_req, res) => {
+    const existing = await db.select().from(targetPuzzles).limit(1);
+    if (existing.length === 0) {
+      const puzzles = generateTargetPuzzles();
+      await db.insert(targetPuzzles).values(puzzles);
+    }
+    const all = await db.select().from(targetPuzzles);
+    all.sort((a, b) => a.chapter - b.chapter || a.levelNumber - b.levelNumber);
+    res.json(all);
+  });
+
+  app.get("/api/target-puzzles/progress", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const progress = await db
+      .select()
+      .from(playerPuzzleProgress)
+      .where(eq(playerPuzzleProgress.playerId, userId));
+    res.json(progress);
+  });
+
+  app.post("/api/target-puzzles/:id/complete", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const puzzleId = parseInt(req.params.id);
+    const { score, stars } = req.body;
+
+    const [existing] = await db
+      .select()
+      .from(playerPuzzleProgress)
+      .where(
+        and(
+          eq(playerPuzzleProgress.playerId, userId),
+          eq(playerPuzzleProgress.puzzleId, puzzleId)
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(playerPuzzleProgress)
+        .set({
+          stars: Math.max(existing.stars, stars),
+          bestScore: Math.max(existing.bestScore, score),
+          completed: true,
+        })
+        .where(eq(playerPuzzleProgress.id, existing.id));
+    } else {
+      await db.insert(playerPuzzleProgress).values({
+        playerId: userId,
+        puzzleId,
+        stars,
+        bestScore: score,
+        completed: true,
+      });
+    }
+
+    const xpReward = 30 + stars * 20;
+    await addBattlePassXp(userId, xpReward);
+
+    const coinsReward = 20 + stars * 15;
+    await db
+      .update(users)
+      .set({ coins: sql`coins + ${coinsReward}` })
+      .where(eq(users.id, userId));
+
+    res.json({ ok: true, xpReward, coinsReward });
+  });
+
+  app.get("/api/daily-puzzle", async (_req, res) => {
+    const today = new Date().toISOString().split("T")[0];
+    let [puzzle] = await db
+      .select()
+      .from(dailyPuzzles)
+      .where(eq(dailyPuzzles.puzzleDate, today))
+      .limit(1);
+
+    if (!puzzle) {
+      const generated = generateDailyPuzzle(today);
+      [puzzle] = await db
+        .insert(dailyPuzzles)
+        .values({
+          puzzleDate: today,
+          gridSetup: generated.gridSetup,
+          pieceSequence: generated.pieceSequence,
+          targetScore: generated.targetScore,
+        })
+        .returning();
+    }
+
+    res.json(puzzle);
+  });
+
+  app.post("/api/daily-puzzle/score", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const { dailyPuzzleId, score } = req.body;
+
+    const [existing] = await db
+      .select()
+      .from(dailyPuzzleScores)
+      .where(
+        and(
+          eq(dailyPuzzleScores.playerId, userId),
+          eq(dailyPuzzleScores.dailyPuzzleId, dailyPuzzleId)
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      if (score > existing.score) {
+        await db
+          .update(dailyPuzzleScores)
+          .set({ score })
+          .where(eq(dailyPuzzleScores.id, existing.id));
+      }
+    } else {
+      await db.insert(dailyPuzzleScores).values({
+        playerId: userId,
+        dailyPuzzleId,
+        score,
+      });
+    }
+
+    await addBattlePassXp(userId, 50);
+
+    res.json({ ok: true });
+  });
+
+  app.get("/api/daily-puzzle/leaderboard", async (_req, res) => {
+    const today = new Date().toISOString().split("T")[0];
+    const [puzzle] = await db
+      .select()
+      .from(dailyPuzzles)
+      .where(eq(dailyPuzzles.puzzleDate, today))
+      .limit(1);
+
+    if (!puzzle) return res.json([]);
+
+    const scores = await db
+      .select({
+        username: users.username,
+        score: dailyPuzzleScores.score,
+      })
+      .from(dailyPuzzleScores)
+      .innerJoin(users, eq(dailyPuzzleScores.playerId, users.id))
+      .where(eq(dailyPuzzleScores.dailyPuzzleId, puzzle.id))
+      .orderBy(desc(dailyPuzzleScores.score))
+      .limit(50);
+
+    res.json(scores);
+  });
+
+  app.get("/api/battle-pass/current", requireAuth, async (req, res) => {
+    const data = await getPlayerBattlePass(req.session.userId!);
+    res.json(data);
+  });
+
+  app.post("/api/battle-pass/claim/:tier", requireAuth, async (req, res) => {
+    try {
+      const tierNum = parseInt(req.params.tier);
+      const result = await claimTierReward(req.session.userId!, tierNum);
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/battle-pass/upgrade", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const user = await getUserById(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const premiumCost = 500;
+    if (user.gems < premiumCost) {
+      return res.status(400).json({ error: "Not enough gems" });
+    }
+
+    await db
+      .update(users)
+      .set({ gems: sql`gems - ${premiumCost}` })
+      .where(eq(users.id, userId));
+
+    const data = await getPlayerBattlePass(userId);
+    await db
+      .update(playerBattlePass)
+      .set({ isPremium: true })
+      .where(eq(playerBattlePass.id, data.playerProgress.id));
+
+    res.json({ ok: true });
+  });
+
+  app.post("/api/battle-pass/xp", requireAuth, async (req, res) => {
+    const { amount } = req.body;
+    const result = await addBattlePassXp(req.session.userId!, amount || 0);
+    res.json(result);
+  });
+
+  app.post("/api/purchases", requireAuth, async (req, res) => {
+    const userId = req.session.userId!;
+    const { productId, receipt, amount, currency } = req.body;
+
+    await db.insert(purchases).values({
+      playerId: userId,
+      productId,
+      receipt,
+      amount,
+      currency,
+    });
+
+    if (productId.startsWith("coins_")) {
+      const coinAmounts: Record<string, number> = {
+        coins_500: 500,
+        coins_1500: 1500,
+        coins_5000: 5000,
+        coins_12000: 12000,
+      };
+      const coins = coinAmounts[productId] || 0;
+      await db
+        .update(users)
+        .set({ coins: sql`coins + ${coins}` })
+        .where(eq(users.id, userId));
+    } else if (productId.startsWith("gems_")) {
+      const gemAmounts: Record<string, number> = {
+        gems_50: 50,
+        gems_200: 200,
+      };
+      const gems = gemAmounts[productId] || 0;
+      await db
+        .update(users)
+        .set({ gems: sql`gems + ${gems}` })
+        .where(eq(users.id, userId));
+    } else if (productId === "vip_monthly") {
+      const expires = new Date();
+      expires.setDate(expires.getDate() + 30);
+      await db
+        .update(users)
+        .set({ vipActive: true, vipExpiresAt: expires })
+        .where(eq(users.id, userId));
+    }
+
+    res.json({ ok: true });
+  });
+
+  app.get("/api/leaderboard", async (_req, res) => {
+    const top = await db
+      .select({
+        username: users.username,
+        eloRating: users.eloRating,
+        league: users.league,
+        wins: users.wins,
+      })
+      .from(users)
+      .orderBy(desc(users.eloRating))
+      .limit(50);
+    res.json(top);
+  });
+
+  const httpServer = createServer(app);
+
+  setupWebSocket(httpServer);
+
+  return httpServer;
+}
