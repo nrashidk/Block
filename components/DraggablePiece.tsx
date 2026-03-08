@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback } from "react";
+import React, { useRef, useEffect } from "react";
 import {
   View,
   StyleSheet,
@@ -46,20 +46,17 @@ export default function DraggablePiece({
   const pieceRef = useRef(piece);
   const gridTopRef = useRef(gridTop);
   const gridLeftRef = useRef(gridLeft);
+  // Ref to the static piece container for measureInWindow at drag start
   const containerRef = useRef<View>(null);
-  const pieceCenterRef = useRef({ x: 0, y: 0 });
+  // Offset from the initial touch point to the piece's visual center.
+  // Captured at onPanResponderGrant so getGridPosition maps the piece
+  // center (not the raw finger tip) to grid coordinates.
+  // Initialised to {0,0} so the fallback is the original behaviour.
+  const touchOffsetRef = useRef({ x: 0, y: 0 });
   const onDragStartRef = useRef(onDragStart);
   const onDragMoveRef = useRef(onDragMove);
   const onDragEndRef = useRef(onDragEnd);
   const onDragCancelRef = useRef(onDragCancel);
-
-  const captureCenter = useCallback(() => {
-    containerRef.current?.measureInWindow((x, y, w, h) => {
-      if (w > 0 && h > 0) {
-        pieceCenterRef.current = { x: x + w / 2, y: y + h / 2 };
-      }
-    });
-  }, []);
 
   useEffect(() => {
     pieceRef.current = piece;
@@ -67,9 +64,7 @@ export default function DraggablePiece({
     pan.setValue({ x: 0, y: 0 });
     scaleAnim.stopAnimation();
     scaleAnim.setValue(1);
-    const timer = setTimeout(captureCenter, 50);
-    return () => clearTimeout(timer);
-  }, [piece, captureCenter]);
+  }, [piece]);
 
   useEffect(() => {
     gridTopRef.current = gridTop;
@@ -90,9 +85,13 @@ export default function DraggablePiece({
     onDragCancelRef.current = onDragCancel;
   }, [onDragCancel]);
 
+  // Returns the top-left grid cell {row, col} that the piece should occupy
+  // given the current absolute touch position (gesture.moveX / gesture.moveY).
+  // touchOffsetRef corrects for where on the piece the user initially touched,
+  // so the highlight tracks the piece's visual centre rather than the finger tip.
   const getGridPosition = (
-    dx: number,
-    dy: number
+    moveX: number,
+    moveY: number
   ): { row: number; col: number } => {
     const cellsLeft = gridLeftRef.current + GRID_BORDER + GRID_PADDING;
     const cellsTop = gridTopRef.current + GRID_BORDER + GRID_PADDING;
@@ -103,11 +102,10 @@ export default function DraggablePiece({
     const rowOffset = Math.floor(pieceRows / 2);
     const colOffset = Math.floor(pieceCols / 2);
 
-    // Use piece center + drag delta, not raw touch position.
-    // This ensures the shadow tracks the visual piece center regardless
-    // of where on the piece the user initially touched.
-    const pieceCenterX = pieceCenterRef.current.x + dx;
-    const pieceCenterY = pieceCenterRef.current.y + dy + DRAG_LIFT_OFFSET;
+    // Subtract the finger-to-centre offset so we use the piece's visual
+    // centre rather than the raw touch point for the column/row lookup.
+    const pieceCenterX = moveX - touchOffsetRef.current.x;
+    const pieceCenterY = moveY - touchOffsetRef.current.y + DRAG_LIFT_OFFSET;
 
     const rawCol = Math.floor((pieceCenterX - cellsLeft) / CELL_STEP);
     const rawRow = Math.floor((pieceCenterY - cellsTop) / CELL_STEP);
@@ -119,10 +117,27 @@ export default function DraggablePiece({
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
+      onPanResponderGrant: (_, gesture) => {
         lastGridPos.current = { row: -1, col: -1 };
         pan.stopAnimation();
         pan.setValue({ x: 0, y: 0 });
+
+        // Reset offset to {0,0} so the first move events degrade gracefully
+        // to the original behaviour while measureInWindow resolves.
+        touchOffsetRef.current = { x: 0, y: 0 };
+
+        // After pan is reset the piece is at its tray position. Measure its
+        // actual centre and store the delta from where the user touched it.
+        // This corrects the systematic shadow drift when the user touches
+        // anywhere other than the exact visual centre of the piece.
+        containerRef.current?.measureInWindow((x, y, w, h) => {
+          if (w > 0 && h > 0) {
+            touchOffsetRef.current = {
+              x: gesture.x0 - (x + w / 2),
+              y: gesture.y0 - (y + h / 2),
+            };
+          }
+        });
 
         RNAnimated.spring(scaleAnim, {
           toValue: 1.1,
@@ -134,7 +149,7 @@ export default function DraggablePiece({
       },
       onPanResponderMove: (_, gesture) => {
         pan.setValue({ x: gesture.dx, y: gesture.dy + DRAG_LIFT_OFFSET });
-        const pos = getGridPosition(gesture.dx, gesture.dy);
+        const pos = getGridPosition(gesture.moveX, gesture.moveY);
         if (
           pos.row !== lastGridPos.current.row ||
           pos.col !== lastGridPos.current.col
@@ -163,7 +178,7 @@ export default function DraggablePiece({
           return;
         }
 
-        const pos = getGridPosition(gesture.dx, gesture.dy);
+        const pos = getGridPosition(gesture.moveX, gesture.moveY);
         const p = pieceRef.current;
         const pieceRows = p.cells.length;
         const pieceCols = p.cells[0]?.length || 1;
@@ -210,7 +225,7 @@ export default function DraggablePiece({
       ]}
       {...panResponder.panHandlers}
     >
-      <View ref={containerRef} collapsable={false} style={styles.pieceContainer} onLayout={captureCenter}>
+      <View ref={containerRef} collapsable={false} style={styles.pieceContainer}>
         <BlockPiece piece={piece} cellSize={PIECE_CELL} />
       </View>
     </RNAnimated.View>
