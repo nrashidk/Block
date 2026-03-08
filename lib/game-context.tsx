@@ -38,7 +38,7 @@ interface GameContextValue {
   stats: PlayerStats;
   startGame: (mode: GameMode) => void;
   placePiece: (pieceIndex: number, row: number, col: number) => boolean;
-  usePowerUp: (powerUpId: string, pieceIndex?: number) => void;
+  activatePowerUp: (powerUpId: string, pieceIndex?: number) => void;
   togglePause: () => void;
   canPlace: (pieceIndex: number, row: number, col: number) => boolean;
   getHintPosition: (pieceIndex: number) => { row: number; col: number } | null;
@@ -99,13 +99,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
     loadStats();
   }, []);
 
-  useEffect(() => {
-    if (comboJustIncreased) {
-      const timer = setTimeout(() => setComboJustIncreased(false), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [comboJustIncreased]);
-
   const loadStats = async () => {
     try {
       const saved = await AsyncStorage.getItem(STATS_KEY);
@@ -113,13 +106,17 @@ export function GameProvider({ children }: { children: ReactNode }) {
         const parsed = JSON.parse(saved);
         setStats({ ...getDefaultStats(), ...parsed });
       }
-    } catch {}
+    } catch (e) {
+      console.error("Failed to load stats:", e);
+    }
   };
 
   const saveStats = async (newStats: PlayerStats) => {
     try {
       await AsyncStorage.setItem(STATS_KEY, JSON.stringify(newStats));
-    } catch {}
+    } catch (e) {
+      console.error("Failed to save stats:", e);
+    }
   };
 
   const addXp = useCallback(
@@ -204,10 +201,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
           comboMultiplier *= 2;
         }
 
-        if (prev.scoreMultiplierActive) {
-          comboMultiplier *= 2;
-        }
-
         totalScore = Math.floor(totalScore * comboMultiplier);
         totalScore += piece.cells.flat().filter(Boolean).length * 5;
 
@@ -235,7 +228,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
         if (allUsed) {
           for (let i = 0; i < 3; i++) {
-            newPieces[i] = nextPieces[i] || generateRandomPiece();
+            newPieces[i] = nextPieces[i] ?? generateRandomPiece();
           }
           nextPieces = [
             generateRandomPiece(),
@@ -288,7 +281,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [gameState, addXp]
   );
 
-  const usePowerUp = useCallback(
+  const activatePowerUp = useCallback(
     (powerUpId: string, pieceIndex?: number) => {
       setGameState((prev) => {
         const powerUp = prev.powerUps.find((p) => p.id === powerUpId);
@@ -448,16 +441,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
       );
       return { ...prev, powerUps: newPowerUps };
     });
-    setStats((prev) => {
-      const newStats = {
-        ...prev,
-        powerUps: prev.powerUps?.map((p: any) =>
-          p.id === powerUpId ? { ...p, count: p.count + count } : p
-        ) || [],
-      };
-      saveStats(newStats);
-      return newStats;
-    });
   }, []);
 
   const value = useMemo(
@@ -466,7 +449,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       stats,
       startGame,
       placePiece,
-      usePowerUp,
+      activatePowerUp,
       togglePause,
       canPlace,
       getHintPosition,
@@ -487,7 +470,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       stats,
       startGame,
       placePiece,
-      usePowerUp,
+      activatePowerUp,
       togglePause,
       canPlace,
       getHintPosition,

@@ -69,11 +69,8 @@ export function createInitialGameState(mode: GameMode): GameState {
     gameOver: false,
     isPaused: false,
     mode,
-    survivalTimer: 0,
     moveHistory: [],
     powerUps: defaultPowerUps,
-    scoreMultiplierActive: false,
-    scoreMultiplierTimer: 0,
     totalClears: 0,
     blocksPlaced: 0,
   };
@@ -135,6 +132,7 @@ export function placePieceOnGrid(
         const gr = row + r;
         const gc = col + c;
         if (gr >= 0 && gr < GRID_SIZE && gc >= 0 && gc < GRID_SIZE) {
+          if (piece.type === "ghost" && grid[gr][gc].filled) continue;
           grid[gr][gc] = {
             filled: true,
             colorIndex: piece.colorIndex,
@@ -160,6 +158,8 @@ export function handleSpecialBlock(
 
   switch (piece.type) {
     case "bomb": {
+      // Bomb pieces are 1x1, so the piece position (row, col) is the centroid
+      // Explosion affects a 3x3 area centered on this position
       for (let r = row - 1; r <= row + 1; r++) {
         for (let c = col - 1; c <= col + 1; c++) {
           if (r >= 0 && r < GRID_SIZE && c >= 0 && c < GRID_SIZE && grid[r][c].filled) {

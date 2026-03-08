@@ -37,23 +37,23 @@ import {
 export async function registerRoutes(app: Express): Promise<Server> {
   const PgSession = ConnectPgSimple(session);
 
-  app.use(
-    session({
-      store: new PgSession({
-        conString: process.env.DATABASE_URL,
-        createTableIfMissing: true,
-      }),
-      secret: process.env.SESSION_SECRET!,
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: process.env.NODE_ENV === "production" ? "none" as const : "lax" as const,
-      },
-    })
-  );
+  const sessionMiddleware = session({
+    store: new PgSession({
+      conString: process.env.DATABASE_URL,
+      createTableIfMissing: true,
+    }),
+    secret: process.env.SESSION_SECRET!,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" as const : "lax" as const,
+    },
+  });
+
+  app.use(sessionMiddleware);
 
   app.post("/api/auth/register", async (req, res) => {
     try {
@@ -253,7 +253,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const existing = await db.select().from(targetPuzzles).limit(1);
     if (existing.length === 0) {
       const puzzles = generateTargetPuzzles();
-      await db.insert(targetPuzzles).values(puzzles);
+      try {
+        await db.insert(targetPuzzles).values(puzzles).onConflictDoNothing();
+      } catch (e) {
+        console.error("Target puzzle seed conflict (likely concurrent request):", e);
+      }
     }
     const all = await db.select().from(targetPuzzles);
     all.sort((a, b) => a.chapter - b.chapter || a.levelNumber - b.levelNumber);
@@ -271,7 +275,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/target-puzzles/:id/complete", requireAuth, async (req, res) => {
     const userId = req.session.userId!;
-    const puzzleId = parseInt(req.params.id);
+    const puzzleId = parseInt(req.params.id as string);
     const { score, stars } = req.body;
 
     const [existing] = await db
@@ -406,7 +410,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/battle-pass/claim/:tier", requireAuth, async (req, res) => {
     try {
-      const tierNum = parseInt(req.params.tier);
+      const tierNum = parseInt(req.params.tier as string);
       const result = await claimTierReward(req.session.userId!, tierNum);
       res.json(result);
     } catch (err: any) {
@@ -438,22 +442,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ ok: true });
   });
 
-  app.post("/api/battle-pass/xp", requireAuth, async (req, res) => {
-    const { amount } = req.body;
-    const result = await addBattlePassXp(req.session.userId!, amount || 0);
-    res.json(result);
-  });
+  // Battle pass XP is awarded internally only — no public endpoint
+
+  const VALID_PRODUCT_IDS = new Set([
+    "coins_500", "coins_1500", "coins_5000", "coins_12000",
+    "gems_50", "gems_200", "vip_monthly",
+  ]);
+  const purchaseTimestamps = new Map<string, number[]>();
+
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, timestamps] of purchaseTimestamps) {
+      const recent = timestamps.filter((t) => now - t < 60_000);
+      if (recent.length === 0) {
+        purchaseTimestamps.delete(key);
+      } else {
+        purchaseTimestamps.set(key, recent);
+      }
+    }
+  }, 60_000);
 
   app.post("/api/purchases", requireAuth, async (req, res) => {
     const userId = req.session.userId!;
     const { productId, receipt, amount, currency } = req.body;
 
+    if (!productId || !VALID_PRODUCT_IDS.has(productId)) {
+      return res.status(400).json({ message: "Invalid product ID" });
+    }
+
+    if (!receipt || typeof receipt !== "string" || receipt.length < 10) {
+      return res.status(400).json({ message: "Valid purchase receipt required" });
+    }
+
+    const now = Date.now();
+    const userPurchases = purchaseTimestamps.get(userId) || [];
+    const recentPurchases = userPurchases.filter((t) => now - t < 60_000);
+    if (recentPurchases.length >= 5) {
+      return res.status(429).json({ message: "Too many purchase requests" });
+    }
+    recentPurchases.push(now);
+    purchaseTimestamps.set(userId, recentPurchases);
+
+    const [existingReceipt] = await db
+      .select()
+      .from(purchases)
+      .where(eq(purchases.receipt, receipt))
+      .limit(1);
+    if (existingReceipt) {
+      return res.status(409).json({ message: "Receipt already redeemed" });
+    }
+
     await db.insert(purchases).values({
       playerId: userId,
       productId,
       receipt,
-      amount,
-      currency,
+      amount: amount || "0",
+      currency: currency || "USD",
     });
 
     if (productId.startsWith("coins_")) {
@@ -506,7 +550,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const httpServer = createServer(app);
 
-  setupWebSocket(httpServer);
+  setupWebSocket(httpServer, sessionMiddleware);
 
   return httpServer;
 }

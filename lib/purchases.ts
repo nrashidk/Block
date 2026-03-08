@@ -73,10 +73,19 @@ export const VIP_SUBSCRIPTION: Product = {
 };
 
 export async function purchaseProduct(product: Product): Promise<boolean> {
+  if (process.env.NODE_ENV === "production") {
+    // Production: real platform receipt must be obtained from the app store SDK
+    // (expo-in-app-purchases or react-native-iap) and passed here.
+    // Until that integration is complete, purchases are blocked in production.
+    console.warn("IAP: real receipt validation not yet integrated — purchase blocked in production.");
+    return false;
+  }
+
+  // Development only: simulate a purchase with a mock receipt for testing UI flows.
   try {
     await apiRequest("POST", "/api/purchases", {
       productId: product.id,
-      receipt: `mock_receipt_${Date.now()}`,
+      receipt: `dev_mock_receipt_${Date.now()}`,
       amount: parseFloat(product.price.replace(/[^0-9.]/g, "")),
       currency: "USD",
     });
