@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useCallback } from "react";
 import {
   View,
   StyleSheet,
@@ -46,10 +46,20 @@ export default function DraggablePiece({
   const pieceRef = useRef(piece);
   const gridTopRef = useRef(gridTop);
   const gridLeftRef = useRef(gridLeft);
+  const containerRef = useRef<View>(null);
+  const pieceCenterRef = useRef({ x: 0, y: 0 });
   const onDragStartRef = useRef(onDragStart);
   const onDragMoveRef = useRef(onDragMove);
   const onDragEndRef = useRef(onDragEnd);
   const onDragCancelRef = useRef(onDragCancel);
+
+  const captureCenter = useCallback(() => {
+    containerRef.current?.measureInWindow((x, y, w, h) => {
+      if (w > 0 && h > 0) {
+        pieceCenterRef.current = { x: x + w / 2, y: y + h / 2 };
+      }
+    });
+  }, []);
 
   useEffect(() => {
     pieceRef.current = piece;
@@ -57,7 +67,9 @@ export default function DraggablePiece({
     pan.setValue({ x: 0, y: 0 });
     scaleAnim.stopAnimation();
     scaleAnim.setValue(1);
-  }, [piece]);
+    const timer = setTimeout(captureCenter, 50);
+    return () => clearTimeout(timer);
+  }, [piece, captureCenter]);
 
   useEffect(() => {
     gridTopRef.current = gridTop;
@@ -79,8 +91,8 @@ export default function DraggablePiece({
   }, [onDragCancel]);
 
   const getGridPosition = (
-    moveX: number,
-    moveY: number
+    dx: number,
+    dy: number
   ): { row: number; col: number } => {
     const cellsLeft = gridLeftRef.current + GRID_BORDER + GRID_PADDING;
     const cellsTop = gridTopRef.current + GRID_BORDER + GRID_PADDING;
@@ -91,8 +103,11 @@ export default function DraggablePiece({
     const rowOffset = Math.floor(pieceRows / 2);
     const colOffset = Math.floor(pieceCols / 2);
 
-    const pieceCenterX = moveX;
-    const pieceCenterY = moveY + DRAG_LIFT_OFFSET;
+    // Use piece center + drag delta, not raw touch position.
+    // This ensures the shadow tracks the visual piece center regardless
+    // of where on the piece the user initially touched.
+    const pieceCenterX = pieceCenterRef.current.x + dx;
+    const pieceCenterY = pieceCenterRef.current.y + dy + DRAG_LIFT_OFFSET;
 
     const rawCol = Math.floor((pieceCenterX - cellsLeft) / CELL_STEP);
     const rawRow = Math.floor((pieceCenterY - cellsTop) / CELL_STEP);
@@ -119,7 +134,7 @@ export default function DraggablePiece({
       },
       onPanResponderMove: (_, gesture) => {
         pan.setValue({ x: gesture.dx, y: gesture.dy + DRAG_LIFT_OFFSET });
-        const pos = getGridPosition(gesture.moveX, gesture.moveY);
+        const pos = getGridPosition(gesture.dx, gesture.dy);
         if (
           pos.row !== lastGridPos.current.row ||
           pos.col !== lastGridPos.current.col
@@ -148,7 +163,7 @@ export default function DraggablePiece({
           return;
         }
 
-        const pos = getGridPosition(gesture.moveX, gesture.moveY);
+        const pos = getGridPosition(gesture.dx, gesture.dy);
         const p = pieceRef.current;
         const pieceRows = p.cells.length;
         const pieceCols = p.cells[0]?.length || 1;
@@ -195,7 +210,7 @@ export default function DraggablePiece({
       ]}
       {...panResponder.panHandlers}
     >
-      <View collapsable={false} style={styles.pieceContainer}>
+      <View ref={containerRef} collapsable={false} style={styles.pieceContainer} onLayout={captureCenter}>
         <BlockPiece piece={piece} cellSize={PIECE_CELL} />
       </View>
     </RNAnimated.View>
