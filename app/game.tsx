@@ -111,9 +111,12 @@ export default function GameScreen() {
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
+    // Re-measure the board now, while it is static, so any drift from a prior
+    // placement/animation is corrected before this drag uses it.
+    measureGrid();
     setHighlightCells([]);
     setHintCells([]);
-  }, []);
+  }, [measureGrid]);
 
   const handleDragMove = useCallback(
     (pieceIndex: number, row: number, col: number) => {

@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
@@ -5,6 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 const app = express();
+app.set("trust proxy", 1);
 const log = console.log;
 
 declare module "http" {
@@ -17,24 +19,28 @@ function setupCors(app: express.Application) {
   app.use((req, res, next) => {
     const origins = new Set<string>();
 
-    if (process.env.REPLIT_DEV_DOMAIN) {
-      origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
-    }
-
-    if (process.env.REPLIT_DOMAINS) {
-      process.env.REPLIT_DOMAINS.split(",").forEach((d: string) => {
-        origins.add(`https://${d.trim()}`);
+    // Explicit allow-list from env (comma-separated full origins)
+    if (process.env.ALLOWED_ORIGINS) {
+      process.env.ALLOWED_ORIGINS.split(",").forEach((d: string) => {
+        origins.add(d.trim());
       });
+    }
+    if (process.env.EXPO_PUBLIC_DOMAIN) {
+      origins.add(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
     }
 
     const origin = req.header("origin");
 
-    // Allow localhost origins for Expo web development (any port)
-    const isLocalhost =
-      origin?.startsWith("http://localhost:") ||
-      origin?.startsWith("http://127.0.0.1:");
+    // Allow localhost (Expo web), GitHub Codespaces, and Expo tunnel hosts
+    const isAllowedPattern =
+      !!origin &&
+      (origin.startsWith("http://localhost:") ||
+        origin.startsWith("http://127.0.0.1:") ||
+        /\.app\.github\.dev$/.test(origin) ||
+        /\.exp\.direct$/.test(origin) ||
+        /\.expo\.dev$/.test(origin));
 
-    if (origin && (origins.has(origin) || isLocalhost)) {
+    if (origin && (origins.has(origin) || isAllowedPattern)) {
       res.header("Access-Control-Allow-Origin", origin);
       res.header(
         "Access-Control-Allow-Methods",

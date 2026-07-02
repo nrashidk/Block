@@ -86,16 +86,16 @@ function AnimatedCell({
     ? Colors.blockColors[cell.colorIndex % Colors.blockColors.length]
     : isHighlighted
     ? highlightValid
-      ? "rgba(0, 229, 255, 0.25)"
-      : "rgba(255, 45, 120, 0.25)"
+      ? "rgba(0, 229, 255, 0.55)"
+      : "rgba(255, 45, 120, 0.45)"
     : "rgba(255, 255, 255, 0.03)";
 
   const borderColor = cell.filled
     ? "rgba(255, 255, 255, 0.15)"
     : isHighlighted
     ? highlightValid
-      ? "rgba(0, 229, 255, 0.5)"
-      : "rgba(255, 45, 120, 0.5)"
+      ? "rgba(0, 229, 255, 0.9)"
+      : "rgba(255, 45, 120, 0.9)"
     : "rgba(255, 255, 255, 0.06)";
 
   return (

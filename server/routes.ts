@@ -49,8 +49,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     cookie: {
       maxAge: 30 * 24 * 60 * 60 * 1000,
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "none" as const : "lax" as const,
+      // Cross-site (phone -> https Codespaces backend) needs Secure + SameSite=None.
+      // Set CROSS_SITE_COOKIES=true in dev so login works without faking production.
+      secure:
+        process.env.CROSS_SITE_COOKIES === "true" ||
+        process.env.NODE_ENV === "production",
+      sameSite:
+        process.env.CROSS_SITE_COOKIES === "true" ||
+        process.env.NODE_ENV === "production"
+          ? ("none" as const)
+          : ("lax" as const),
     },
   });
 
