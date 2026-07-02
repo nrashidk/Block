@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import { z } from "zod";
 import { createServer, type Server } from "node:http";
 import session from "express-session";
 import ConnectPgSimple from "connect-pg-simple";
@@ -35,6 +36,30 @@ import {
   claimTierReward,
 } from "./battle-pass";
 
+const registerSchema = z.object({
+  username: z.string().min(3).max(20),
+  password: z.string().min(4).max(100),
+});
+const loginSchema = z.object({
+  username: z.string().min(1).max(50),
+  password: z.string().min(1).max(100),
+});
+const socialSchema = z.object({
+  provider: z.enum(["google", "apple"]),
+  providerId: z.string().min(1).max(200),
+  displayName: z.string().min(1).max(100),
+  idToken: z.string().optional(),
+});
+
+function validate<T>(schema: z.ZodSchema<T>, body: unknown, res: any): T | null {
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message || "Invalid input" });
+    return null;
+  }
+  return parsed.data;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   const PgSession = ConnectPgSimple(session);
 
@@ -66,6 +91,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/register", async (req, res) => {
     try {
+      if (!validate(registerSchema, req.body, res)) return;
       const { username, password } = req.body;
       if (!username || !password) {
         return res.status(400).json({ error: "Username and password required" });
@@ -92,6 +118,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/login", async (req, res) => {
     try {
+      if (!validate(loginSchema, req.body, res)) return;
       const { username, password } = req.body;
       if (!username || !password) {
         return res.status(400).json({ error: "Username and password required" });
@@ -142,22 +169,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  app.post("/api/admin/promote-self", requireAuth, async (req, res) => {
-    const userId = req.session.userId!;
-    const adminCount = await db
-      .select()
-      .from(users)
-      .where(eq(users.isAdmin, true))
-      .limit(1);
-    if (adminCount.length > 0) {
-      return res.status(403).json({ error: "Admin already exists" });
-    }
-    await db
-      .update(users)
-      .set({ isAdmin: true })
-      .where(eq(users.id, userId));
-    res.json({ ok: true });
-  });
+  // /api/admin/promote-self removed (privilege-escalation risk).
+  // Seed admin manually in the DB:  UPDATE users SET is_admin = true WHERE username = '<you>';
 
   app.post("/api/auth/logout", (req, res) => {
     req.session.destroy(() => {
@@ -190,6 +203,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/social", async (req, res) => {
     try {
+      if (!validate(socialSchema, req.body, res)) return;
       const { provider, providerId, displayName, idToken } = req.body;
       if (!provider || !providerId || !displayName) {
         return res.status(400).json({ error: "Missing provider info" });
