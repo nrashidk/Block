@@ -29,7 +29,7 @@
     "bcryptjs": "^3.0.3",
     "connect-pg-simple": "^10.0.0",
     "dotenv": "^16.4.5",
-    "drizzle-orm": "^0.39.3",
+    "drizzle-orm": "^0.45.2",
     "drizzle-zod": "^0.7.0",
     "esbuild": "^0.27.3",
     "expo": "~54.0.27",
